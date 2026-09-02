@@ -285,7 +285,7 @@ def update_roadmap_task(project_name: str, task_name: str, status: str) -> str:
             "**Legend**",
             "✅ Completed",
             "🔄 In Progress",
-            "⚠️ In Testing",
+            "🛠️ In Testing",
             "⬜ Planned"
         ]
         
