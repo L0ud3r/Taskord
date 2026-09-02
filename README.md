@@ -95,8 +95,11 @@ Analyzes recent local Git work and synchronizes an evidence-based status report 
   - `project_name` (`str`): The Discord project/category to inspect.
   - `repository_path` (`str`, default `"."`): Local Git repository to analyze.
   - `commit_limit` (`int`, default `5`): Number of recent commits to include (1–20).
-- **Behavior:** Reads the active branch, working-tree status, and recent commits using read-only Git commands. It scans the ten most recent messages in every text channel beneath the project category, without duplicating those message contents, then publishes the resulting report to both #git and #to-do.
+- **Behavior:** Reads the active branch, working-tree status, and recent commits using read-only Git commands. It scans the ten most recent messages in every text channel beneath the project category, without duplicating those message contents, then publishes the resulting report to #git only.
 - **Safety:** The tool does not infer or change roadmap task statuses. It reports whether a roadmap is tracked and asks the calling agent to review the evidence before using update_roadmap_task.
+
+### Local logs
+Each sync writes one compact operational entry to `logs/taskord.log`; no sync messages are posted to #to-do. The file rotates at 512 KB and retains at most three backups, limiting local storage to roughly 2 MB. The `logs/` directory is ignored by Git.
 
 ### 4. `create_roadmap`
 Posts a new formatted roadmap message to Discord and records its channel and message IDs for tracking.

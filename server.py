@@ -2,6 +2,8 @@ import os
 import sys
 import json
 import subprocess
+import logging
+from logging.handlers import RotatingFileHandler
 import httpx
 from mcp.server.fastmcp import FastMCP
 
@@ -12,6 +14,23 @@ mcp = FastMCP("DiscordProjectManager")
 BASE_URL = "https://discord.com/api/v10"
 CONFIG_FILE = "config.json"
 STATE_FILE = "roadmap_state.json"
+LOG_DIRECTORY = "logs"
+LOG_FILE = os.path.join(LOG_DIRECTORY, "taskord.log")
+
+os.makedirs(LOG_DIRECTORY, exist_ok=True)
+logger = logging.getLogger("taskord")
+if not logger.handlers:
+    log_handler = RotatingFileHandler(
+        LOG_FILE,
+        maxBytes=512 * 1024,
+        backupCount=3,
+        encoding="utf-8",
+        delay=True,
+    )
+    log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logger.addHandler(log_handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
 
 STATUS_ICONS = {
     "done": "✅",
@@ -201,7 +220,7 @@ def analyze_and_sync_project_work(
     repository_path: str = ".",
     commit_limit: int = 5,
 ) -> str:
-    """Analyze local Git work, scan project channels, and publish a sync report to #git and #to-do."""
+    """Analyze local Git work, scan project channels, and publish a sync report to #git."""
     if not project_name.strip():
         return "Project name cannot be empty."
     if not 1 <= commit_limit <= 20:
@@ -217,7 +236,7 @@ def analyze_and_sync_project_work(
 
         project_channels = get_project_text_channels(project_name)
         channels_by_name = {channel["name"].lower(): channel for channel in project_channels}
-        missing_channels = {"git", "to-do"} - channels_by_name.keys()
+        missing_channels = {"git"} - channels_by_name.keys()
         if missing_channels:
             return f"Project '{project_name}' is missing required channel(s): {', '.join(sorted(missing_channels))}."
 
@@ -244,18 +263,27 @@ def analyze_and_sync_project_work(
         if len(report) > 2000:
             return "Failed to synchronize project: generated report exceeds Discord's 2,000 character limit."
 
-        for channel_name in ("git", "to-do"):
-            response = httpx.post(
-                f"{BASE_URL}/channels/{channels_by_name[channel_name]['id']}/messages",
-                headers=get_headers(),
-                json={"content": report},
-            )
-            response.raise_for_status()
-        return f"Analyzed repository work and synchronized the report to #git and #to-do for {project_name}."
+        response = httpx.post(
+            f"{BASE_URL}/channels/{channels_by_name['git']['id']}/messages",
+            headers=get_headers(),
+            json={"content": report},
+        )
+        response.raise_for_status()
+        logger.info(
+            "project_sync project=%s branch=%s commits=%s working_tree=%s channels=%s",
+            project_name.strip(),
+            branch,
+            len(commit_lines),
+            worktree_summary,
+            len(project_channels),
+        )
+        return f"Analyzed repository work and synchronized the report to #git for {project_name}."
     except subprocess.CalledProcessError as e:
         error = e.stderr.strip() or "Git command failed."
+        logger.warning("project_sync_git_failure project=%s error=%s", project_name.strip(), error)
         return f"Failed to analyze repository: {error}"
     except Exception as e:
+        logger.exception("project_sync_failure project=%s", project_name.strip())
         return f"Failed to synchronize project work: {str(e)}"
 
 @mcp.tool()

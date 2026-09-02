@@ -17,6 +17,7 @@ ENV/
 # Local state & user configuration
 config.json
 roadmap_state.json
+logs/
 
 # IDE and OS files
 .vscode/
