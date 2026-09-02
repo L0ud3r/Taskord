@@ -11,9 +11,10 @@ Taskord is a **Model Context Protocol (MCP)** server (`DiscordProjectManager`) b
 - [Core Features & MCP Tools](#core-features--mcp-tools)
   - [`set_guild_id` & `get_server_config`](#1-set_guild_id--get_server_config)
   - [`save_idea`](#2-save_idea)
-  - [`create_roadmap`](#3-create_roadmap)
-  - [`replace_roadmap`](#4-replace_roadmap)
-  - [`update_roadmap_task`](#5-update_roadmap_task)
+  - analyze_and_sync_project_work
+  - [`create_roadmap`](#4-create_roadmap)
+  - [`replace_roadmap`](#5-replace_roadmap)
+  - [`update_roadmap_task`](#6-update_roadmap_task)
 - [Progress Calculation & Discord Formatting](#progress-calculation--discord-formatting)
 - [State Management (`roadmap_state.json`)](#state-management-roadmap_statejson)
 - [Installation & Setup](#installation--setup)
@@ -87,7 +88,17 @@ Saves a brainstormed concept or task idea into the designated Discord project id
 
 ---
 
-### 3. `create_roadmap`
+### 3. analyze_and_sync_project_work
+Analyzes recent local Git work and synchronizes an evidence-based status report across the project's collaboration channels.
+
+- **Parameters:**
+  - `project_name` (`str`): The Discord project/category to inspect.
+  - `repository_path` (`str`, default `"."`): Local Git repository to analyze.
+  - `commit_limit` (`int`, default `5`): Number of recent commits to include (1–20).
+- **Behavior:** Reads the active branch, working-tree status, and recent commits using read-only Git commands. It scans the ten most recent messages in every text channel beneath the project category, without duplicating those message contents, then publishes the resulting report to both #git and #to-do.
+- **Safety:** The tool does not infer or change roadmap task statuses. It reports whether a roadmap is tracked and asks the calling agent to review the evidence before using update_roadmap_task.
+
+### 4. `create_roadmap`
 Posts a new formatted roadmap message to Discord and records its channel and message IDs for tracking.
 
 - **Parameters:**
@@ -101,7 +112,7 @@ Posts a new formatted roadmap message to Discord and records its channel and mes
 
 ---
 
-### 4. `replace_roadmap`
+### 5. `replace_roadmap`
 Completely updates/replaces the contents of the existing tracked roadmap message using an in-place Discord API `PATCH` request.
 
 - **Parameters:**
@@ -111,7 +122,7 @@ Completely updates/replaces the contents of the existing tracked roadmap message
 
 ---
 
-### 5. `update_roadmap_task`
+### 6. `update_roadmap_task`
 Updates the status icon of a single task in the roadmap message and automatically recalculates category progress percentages and progress bars.
 
 - **Parameters:**
@@ -261,7 +272,7 @@ The following feature requests have been registered in the `#suggestions` channe
      - `#to-do`
      - `#git`
 
-3. **Intelligent Work Analysis & Multi-Channel Sync:**
-   - Automated sync engine that analyzes recent codebase work, commits, and progress.
-   - Crawls and synchronizes all text channels under a project to align tasks, roadmaps, and git logs with actual development status.
+3. **Intelligent Work Analysis & Multi-Channel Sync:** ✅ Implemented with analyze_and_sync_project_work.
+   - Analyzes recent local codebase work, commits, branch, and working-tree state.
+   - Scans all text channels under a project and sends a shared evidence-based report to #git and #to-do.
 

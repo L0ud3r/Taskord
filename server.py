@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import subprocess
 import httpx
 from mcp.server.fastmcp import FastMCP
 
@@ -96,6 +97,48 @@ def get_channel_id(channel_name: str, category_name: str | None = None) -> str:
     category_suffix = f" in category '{category_name}'" if category_name else ""
     raise ValueError(f"Channel '{channel_name}' not found{category_suffix}.")
 
+def get_project_text_channels(project_name: str) -> list[dict]:
+    """Return text channels that belong to a named project category."""
+    guild_id = get_guild_id()
+    response = httpx.get(f"{BASE_URL}/guilds/{guild_id}/channels", headers=get_headers())
+    response.raise_for_status()
+    channels = response.json()
+    category = next(
+        (
+            channel for channel in channels
+            if channel.get("type") == 4
+            and channel.get("name", "").lower() == project_name.lower()
+        ),
+        None,
+    )
+    if not category:
+        raise ValueError(f"Project category '{project_name}' was not found.")
+    return [
+        channel for channel in channels
+        if channel.get("type") == 0 and channel.get("parent_id") == category["id"]
+    ]
+
+def get_recent_channel_message_count(channel_id: str, limit: int = 10) -> int:
+    """Count recent messages without copying their content into another channel."""
+    response = httpx.get(
+        f"{BASE_URL}/channels/{channel_id}/messages",
+        headers=get_headers(),
+        params={"limit": limit},
+    )
+    response.raise_for_status()
+    return len(response.json())
+
+def run_git_command(repository_path: str, arguments: list[str]) -> str:
+    """Run a read-only git command in a repository and return its output."""
+    result = subprocess.run(
+        ["git", "-C", repository_path, *arguments],
+        capture_output=True,
+        check=True,
+        text=True,
+        encoding="utf-8",
+    )
+    return result.stdout.strip()
+
 def load_state() -> dict:
     """Load roadmap state from state file."""
     if os.path.exists(STATE_FILE):
@@ -151,6 +194,69 @@ def save_idea(project_name: str, idea_text: str) -> str:
         return f"Successfully saved idea to #{channel_name}."
     except Exception as e:
         return f"Failed to save idea: {str(e)}"
+
+@mcp.tool()
+def analyze_and_sync_project_work(
+    project_name: str,
+    repository_path: str = ".",
+    commit_limit: int = 5,
+) -> str:
+    """Analyze local Git work, scan project channels, and publish a sync report to #git and #to-do."""
+    if not project_name.strip():
+        return "Project name cannot be empty."
+    if not 1 <= commit_limit <= 20:
+        return "commit_limit must be between 1 and 20."
+
+    try:
+        branch = run_git_command(repository_path, ["branch", "--show-current"]) or "detached HEAD"
+        status = run_git_command(repository_path, ["status", "--short"])
+        commits = run_git_command(
+            repository_path,
+            ["log", f"-{commit_limit}", "--pretty=format:%h %s"],
+        )
+
+        project_channels = get_project_text_channels(project_name)
+        channels_by_name = {channel["name"].lower(): channel for channel in project_channels}
+        missing_channels = {"git", "to-do"} - channels_by_name.keys()
+        if missing_channels:
+            return f"Project '{project_name}' is missing required channel(s): {', '.join(sorted(missing_channels))}."
+
+        activity = []
+        for channel in project_channels:
+            message_count = get_recent_channel_message_count(channel["id"])
+            activity.append(f"#{channel['name']}: {message_count} recent messages")
+
+        commit_lines = commits.splitlines() if commits else ["No commits found."]
+        commit_summary = "\n".join(f"• {line[:160]}" for line in commit_lines)
+        worktree_summary = "clean" if not status else f"{len(status.splitlines())} uncommitted change(s)"
+        roadmap_tracked = project_name.lower() in load_state()
+        report = "\n".join([
+            f"🔄 **Project Work Sync — {project_name.strip()}**",
+            f"**Branch:** {branch}",
+            f"**Working tree:** {worktree_summary}",
+            f"**Roadmap tracked:** {'yes' if roadmap_tracked else 'no'}",
+            "**Recent commits:**",
+            commit_summary,
+            "**Project channel activity (last 10 messages each):**",
+            "; ".join(activity),
+            "Review the roadmap and to-do items against this report before changing task status.",
+        ])
+        if len(report) > 2000:
+            return "Failed to synchronize project: generated report exceeds Discord's 2,000 character limit."
+
+        for channel_name in ("git", "to-do"):
+            response = httpx.post(
+                f"{BASE_URL}/channels/{channels_by_name[channel_name]['id']}/messages",
+                headers=get_headers(),
+                json={"content": report},
+            )
+            response.raise_for_status()
+        return f"Analyzed repository work and synchronized the report to #git and #to-do for {project_name}."
+    except subprocess.CalledProcessError as e:
+        error = e.stderr.strip() or "Git command failed."
+        return f"Failed to analyze repository: {error}"
+    except Exception as e:
+        return f"Failed to synchronize project work: {str(e)}"
 
 @mcp.tool()
 def create_roadmap(project_name: str, initial_roadmap: str) -> str:
