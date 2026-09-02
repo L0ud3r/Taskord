@@ -11,9 +11,10 @@ Taskord is a **Model Context Protocol (MCP)** server (`DiscordProjectManager`) b
 - [Core Features & MCP Tools](#core-features--mcp-tools)
   - [`set_guild_id` & `get_server_config`](#1-set_guild_id--get_server_config)
   - [`save_idea`](#2-save_idea)
-  - [`create_roadmap`](#3-create_roadmap)
-  - [`replace_roadmap`](#4-replace_roadmap)
-  - [`update_roadmap_task`](#5-update_roadmap_task)
+  - [`log_pull_request_activity`](#3-log_pull_request_activity)
+  - [`create_roadmap`](#4-create_roadmap)
+  - [`replace_roadmap`](#5-replace_roadmap)
+  - [`update_roadmap_task`](#6-update_roadmap_task)
 - [Progress Calculation & Discord Formatting](#progress-calculation--discord-formatting)
 - [State Management (`roadmap_state.json`)](#state-management-roadmap_statejson)
 - [Installation & Setup](#installation--setup)
@@ -87,7 +88,27 @@ Saves a brainstormed concept or task idea into the designated Discord project id
 
 ---
 
-### 3. `create_roadmap`
+### 3. `log_pull_request_activity`
+Posts a pull-request lifecycle update in the project's `#git` channel. This tool is designed for agents, CI jobs, or webhook handlers to call whenever a pull request changes state.
+
+- **Parameters:**
+  - `project_name` (`str`): Project / Discord category containing `#git`.
+  - `repository` (`str`): Repository identifier, for example `L0ud3r/Taskord`.
+  - `pull_request_number` (`int`): Positive GitHub pull-request number.
+  - `event` (`str`): `opened`, `merged`, or `closed`.
+  - `title`, `author`, `url`, `summary` (`str`, optional): PR metadata included when supplied.
+- **Behavior:** Validates the event, finds `#git` beneath the project's category, and posts a single formatted audit entry. It never needs a GitHub token because the caller supplies the event data.
+
+**Example output:**
+```markdown
+🟣 Merged **Pull Request L0ud3r/Taskord#12**
+**Title:** feat: add project scaffolding
+**Author:** L0ud3r
+**Link:** https://github.com/L0ud3r/Taskord/pull/12
+**Summary:** Creates a category and the standard project channels.
+```
+
+### 4. `create_roadmap`
 Posts a new formatted roadmap message to Discord and records its channel and message IDs for tracking.
 
 - **Parameters:**
@@ -101,7 +122,7 @@ Posts a new formatted roadmap message to Discord and records its channel and mes
 
 ---
 
-### 4. `replace_roadmap`
+### 5. `replace_roadmap`
 Completely updates/replaces the contents of the existing tracked roadmap message using an in-place Discord API `PATCH` request.
 
 - **Parameters:**
@@ -111,7 +132,7 @@ Completely updates/replaces the contents of the existing tracked roadmap message
 
 ---
 
-### 5. `update_roadmap_task`
+### 6. `update_roadmap_task`
 Updates the status icon of a single task in the roadmap message and automatically recalculates category progress percentages and progress bars.
 
 - **Parameters:**
@@ -250,9 +271,9 @@ Add the server to your MCP configuration (e.g., Claude Desktop, Cursor, Antigrav
 
 The following feature requests have been registered in the `#suggestions` channel (Taskord category) on Discord:
 
-1. **Pull Request Activity Logging:**
-   - Record and log GitHub/Git pull requests (opened, merged, closed) into dedicated project channels (e.g., `#git`).
-   - Keep project members informed with PR titles, authors, status, and summaries.
+1. **Pull Request Activity Logging:** ✅ Implemented with `log_pull_request_activity`.
+   - Record GitHub/Git pull requests (opened, merged, closed) in each project's `#git` channel.
+   - Keep project members informed with PR titles, authors, links, and summaries.
 
 2. **Automated Project & Channel Scaffolding:**
    - Create a project on demand directly through MCP tools.
