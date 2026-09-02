@@ -96,6 +96,27 @@ def get_channel_id(channel_name: str, category_name: str | None = None) -> str:
     category_suffix = f" in category '{category_name}'" if category_name else ""
     raise ValueError(f"Channel '{channel_name}' not found{category_suffix}.")
 
+def get_guild_channels() -> list[dict]:
+    """Return all channels in the configured Discord guild."""
+    guild_id = get_guild_id()
+    response = httpx.get(f"{BASE_URL}/guilds/{guild_id}/channels", headers=get_headers())
+    response.raise_for_status()
+    return response.json()
+
+def create_guild_channel(name: str, channel_type: int, parent_id: str | None = None) -> dict:
+    """Create a category or text channel in the configured Discord guild."""
+    guild_id = get_guild_id()
+    payload = {"name": name, "type": channel_type}
+    if parent_id:
+        payload["parent_id"] = parent_id
+    response = httpx.post(
+        f"{BASE_URL}/guilds/{guild_id}/channels",
+        headers=get_headers(),
+        json=payload,
+    )
+    response.raise_for_status()
+    return response.json()
+
 def load_state() -> dict:
     """Load roadmap state from state file."""
     if os.path.exists(STATE_FILE):
@@ -151,6 +172,40 @@ def save_idea(project_name: str, idea_text: str) -> str:
         return f"Successfully saved idea to #{channel_name}."
     except Exception as e:
         return f"Failed to save idea: {str(e)}"
+
+@mcp.tool()
+def create_project_workspace(project_name: str) -> str:
+    """Creates a project category with #roadmap, #to-do, and #git text channels."""
+    display_name = project_name.strip()
+    if not display_name:
+        return "Project name cannot be empty."
+    if len(display_name) > 100:
+        return "Project name cannot exceed Discord's 100 character channel-name limit."
+
+    try:
+        channels = get_guild_channels()
+        existing_category = next(
+            (
+                channel for channel in channels
+                if channel.get("type") == 4
+                and channel.get("name", "").lower() == display_name.lower()
+            ),
+            None,
+        )
+        if existing_category:
+            return f"A project category named '{display_name}' already exists; no channels were created."
+
+        category = create_guild_channel(display_name, channel_type=4)
+        created_channels = []
+        for channel_name in ("roadmap", "to-do", "git"):
+            channel = create_guild_channel(channel_name, channel_type=0, parent_id=category["id"])
+            created_channels.append(f"#{channel['name']}")
+        return (
+            f"Created project workspace '{display_name}' with category ID {category['id']} and "
+            f"channels {', '.join(created_channels)}."
+        )
+    except Exception as e:
+        return f"Failed to create project workspace: {str(e)}"
 
 @mcp.tool()
 def create_roadmap(project_name: str, initial_roadmap: str) -> str:

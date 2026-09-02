@@ -11,9 +11,10 @@ Taskord is a **Model Context Protocol (MCP)** server (`DiscordProjectManager`) b
 - [Core Features & MCP Tools](#core-features--mcp-tools)
   - [`set_guild_id` & `get_server_config`](#1-set_guild_id--get_server_config)
   - [`save_idea`](#2-save_idea)
-  - [`create_roadmap`](#3-create_roadmap)
-  - [`replace_roadmap`](#4-replace_roadmap)
-  - [`update_roadmap_task`](#5-update_roadmap_task)
+  - [`create_project_workspace`](#3-create_project_workspace)
+  - [`create_roadmap`](#4-create_roadmap)
+  - [`replace_roadmap`](#5-replace_roadmap)
+  - [`update_roadmap_task`](#6-update_roadmap_task)
 - [Progress Calculation & Discord Formatting](#progress-calculation--discord-formatting)
 - [State Management (`roadmap_state.json`)](#state-management-roadmap_statejson)
 - [Installation & Setup](#installation--setup)
@@ -87,7 +88,15 @@ Saves a brainstormed concept or task idea into the designated Discord project id
 
 ---
 
-### 3. `create_roadmap`
+### 3. `create_project_workspace`
+Creates the standard Discord workspace for a new project in one MCP call.
+
+- **Parameters:**
+  - `project_name` (`str`): The project/category name to create (up to 100 characters).
+- **Behavior:** Creates a Discord category with the provided name and three text channels beneath it: `#roadmap`, `#to-do`, and `#git`. The tool first checks for an existing category with the same name and stops without making changes if it finds one, preventing accidental duplicate workspaces.
+- **Output:** Returns the category ID and the channels created. A roadmap message is not created until `create_roadmap` is called.
+
+### 4. `create_roadmap`
 Posts a new formatted roadmap message to Discord and records its channel and message IDs for tracking.
 
 - **Parameters:**
@@ -101,7 +110,7 @@ Posts a new formatted roadmap message to Discord and records its channel and mes
 
 ---
 
-### 4. `replace_roadmap`
+### 5. `replace_roadmap`
 Completely updates/replaces the contents of the existing tracked roadmap message using an in-place Discord API `PATCH` request.
 
 - **Parameters:**
@@ -111,7 +120,7 @@ Completely updates/replaces the contents of the existing tracked roadmap message
 
 ---
 
-### 5. `update_roadmap_task`
+### 6. `update_roadmap_task`
 Updates the status icon of a single task in the roadmap message and automatically recalculates category progress percentages and progress bars.
 
 - **Parameters:**
@@ -254,7 +263,7 @@ The following feature requests have been registered in the `#suggestions` channe
    - Record and log GitHub/Git pull requests (opened, merged, closed) into dedicated project channels (e.g., `#git`).
    - Keep project members informed with PR titles, authors, status, and summaries.
 
-2. **Automated Project & Channel Scaffolding:**
+2. **Automated Project & Channel Scaffolding:** ✅ Implemented with `create_project_workspace`.
    - Create a project on demand directly through MCP tools.
    - Automatically provisions a Discord Category (matching the project name) and spawns 3 standard channels:
      - `#roadmap`
