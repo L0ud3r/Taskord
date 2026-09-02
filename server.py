@@ -3,6 +3,7 @@ import sys
 import json
 import subprocess
 import logging
+import re
 from logging.handlers import RotatingFileHandler
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -14,6 +15,7 @@ mcp = FastMCP("DiscordProjectManager")
 BASE_URL = "https://discord.com/api/v10"
 CONFIG_FILE = "config.json"
 STATE_FILE = "roadmap_state.json"
+PULL_REQUEST_SYNC_FILE = "pull_request_sync_state.json"
 LOG_DIRECTORY = "logs"
 LOG_FILE = os.path.join(LOG_DIRECTORY, "taskord.log")
 
@@ -116,37 +118,6 @@ def get_channel_id(channel_name: str, category_name: str | None = None) -> str:
     category_suffix = f" in category '{category_name}'" if category_name else ""
     raise ValueError(f"Channel '{channel_name}' not found{category_suffix}.")
 
-def get_project_text_channels(project_name: str) -> list[dict]:
-    """Return text channels that belong to a named project category."""
-    guild_id = get_guild_id()
-    response = httpx.get(f"{BASE_URL}/guilds/{guild_id}/channels", headers=get_headers())
-    response.raise_for_status()
-    channels = response.json()
-    category = next(
-        (
-            channel for channel in channels
-            if channel.get("type") == 4
-            and channel.get("name", "").lower() == project_name.lower()
-        ),
-        None,
-    )
-    if not category:
-        raise ValueError(f"Project category '{project_name}' was not found.")
-    return [
-        channel for channel in channels
-        if channel.get("type") == 0 and channel.get("parent_id") == category["id"]
-    ]
-
-def get_recent_channel_message_count(channel_id: str, limit: int = 10) -> int:
-    """Count recent messages without copying their content into another channel."""
-    response = httpx.get(
-        f"{BASE_URL}/channels/{channel_id}/messages",
-        headers=get_headers(),
-        params={"limit": limit},
-    )
-    response.raise_for_status()
-    return len(response.json())
-
 def run_git_command(repository_path: str, arguments: list[str]) -> str:
     """Run a read-only git command in a repository and return its output."""
     result = subprocess.run(
@@ -157,6 +128,139 @@ def run_git_command(repository_path: str, arguments: list[str]) -> str:
         encoding="utf-8",
     )
     return result.stdout.strip()
+
+def get_github_repository(repository_path: str) -> str:
+    """Resolve the GitHub owner/repository name from the local origin remote."""
+    origin_url = run_git_command(repository_path, ["remote", "get-url", "origin"])
+    match = re.search(r"github\.com[/:]([^/\s:]+)/([^/\s]+?)(?:\.git)?$", origin_url)
+    if not match:
+        raise ValueError("The origin remote must point to a GitHub repository.")
+    return f"{match.group(1)}/{match.group(2)}"
+
+def get_github_pull_requests(repository: str, limit: int) -> list[dict]:
+    """Fetch pull requests through the authenticated GitHub CLI."""
+    result = subprocess.run(
+        [
+            "gh", "pr", "list", "--repo", repository, "--state", "all",
+            "--limit", str(limit), "--json", "number,title,state,mergedAt,author,url",
+        ],
+        capture_output=True,
+        check=True,
+        text=True,
+        encoding="utf-8",
+    )
+    return json.loads(result.stdout)
+
+def load_pull_request_sync_state() -> dict:
+    """Load local state used to avoid reposting already synchronized pull requests."""
+    if os.path.exists(PULL_REQUEST_SYNC_FILE):
+        try:
+            with open(PULL_REQUEST_SYNC_FILE, "r", encoding="utf-8") as file:
+                return json.load(file)
+        except Exception:
+            return {}
+    return {}
+
+def save_pull_request_sync_state(state: dict) -> None:
+    """Persist pull-request sync state locally."""
+    with open(PULL_REQUEST_SYNC_FILE, "w", encoding="utf-8") as file:
+        json.dump(state, file, indent=2)
+
+def get_registered_pull_request_numbers(channel_id: str, repository: str) -> set[int]:
+    """Find pull-request links already present in the recent #git channel history."""
+    response = httpx.get(
+        f"{BASE_URL}/channels/{channel_id}/messages",
+        headers=get_headers(),
+        params={"limit": 100},
+    )
+    response.raise_for_status()
+    pattern = re.compile(rf"github\.com/{re.escape(repository)}/pull/(\d+)", re.IGNORECASE)
+    return {
+        int(match.group(1))
+        for message in response.json()
+        for match in pattern.finditer(message.get("content", ""))
+    }
+
+def get_pull_request_status(pull_request: dict) -> tuple[str, str]:
+    """Convert a GitHub pull-request state to Taskord status and Discord label."""
+    if pull_request.get("mergedAt"):
+        return "done", "✅ Successful"
+    if pull_request.get("state") == "OPEN":
+        return "testing", "🛠️ Open"
+    return "planned", "🔴 Closed"
+
+def get_roadmap_content(project_name: str) -> str | None:
+    """Fetch the tracked roadmap once for use during a sync operation."""
+    state = load_state()
+    project = state.get(project_name.lower())
+    if not project:
+        return None
+    response = httpx.get(
+        f"{BASE_URL}/channels/{project['channel_id']}/messages/{project['message_id']}",
+        headers=get_headers(),
+    )
+    response.raise_for_status()
+    return response.json()["content"]
+
+def get_roadmap_task_match(
+    project_name: str,
+    pull_request_title: str,
+    roadmap_content: str | None = None,
+) -> str | None:
+    """Find a roadmap task only when its meaningful words clearly match a PR title."""
+    if roadmap_content is None:
+        roadmap_content = get_roadmap_content(project_name)
+    if roadmap_content is None:
+        return None
+    task_lines = [
+        line for line in roadmap_content.splitlines()
+        if line.startswith(tuple(STATUS_ICONS.values()))
+    ]
+    ignored_words = {"add", "and", "feat", "for", "the", "to", "with"}
+
+    def terms(value: str) -> set[str]:
+        normalized = set()
+        for word in re.findall(r"[a-zA-Z]{3,}", value.lower()):
+            if word in ignored_words:
+                continue
+            if word.startswith("analy"):
+                normalized.add("analysis")
+            elif word.startswith("synchron") or word.startswith("sync"):
+                normalized.add("sync")
+            elif word.startswith("scaffold"):
+                normalized.add("scaffold")
+            else:
+                normalized.add(word[:6])
+        return normalized
+
+    title_terms = terms(pull_request_title)
+    scored_tasks = []
+    for line in task_lines:
+        task_name = line.lstrip("✅🔄🛠️⬜ ").strip()
+        score = len(title_terms & terms(task_name))
+        scored_tasks.append((score, task_name))
+    if not scored_tasks:
+        return None
+    best_score = max(score for score, _ in scored_tasks)
+    matches = [task for score, task in scored_tasks if score == best_score]
+    return matches[0] if best_score >= 2 and len(matches) == 1 else None
+
+def get_roadmap_task_status(
+    project_name: str,
+    task_name: str,
+    roadmap_content: str | None = None,
+) -> str | None:
+    """Return the current Taskord status for one tracked roadmap task."""
+    if roadmap_content is None:
+        roadmap_content = get_roadmap_content(project_name)
+    if roadmap_content is None:
+        return None
+    for line in roadmap_content.splitlines():
+        if task_name.lower() in line.lower():
+            for status, icon in STATUS_ICONS.items():
+                if line.startswith(icon):
+                    return status
+    return None
 
 def load_state() -> dict:
     """Load roadmap state from state file."""
@@ -218,73 +322,88 @@ def save_idea(project_name: str, idea_text: str) -> str:
 def analyze_and_sync_project_work(
     project_name: str,
     repository_path: str = ".",
-    commit_limit: int = 5,
+    pull_request_limit: int = 50,
 ) -> str:
-    """Analyze local Git work, scan project channels, and publish a sync report to #git."""
+    """Sync unregistered GitHub pull requests to #git and update matching roadmap tasks."""
     if not project_name.strip():
         return "Project name cannot be empty."
-    if not 1 <= commit_limit <= 20:
-        return "commit_limit must be between 1 and 20."
+    if not 1 <= pull_request_limit <= 100:
+        return "pull_request_limit must be between 1 and 100."
 
     try:
-        branch = run_git_command(repository_path, ["branch", "--show-current"]) or "detached HEAD"
-        status = run_git_command(repository_path, ["status", "--short"])
-        commits = run_git_command(
-            repository_path,
-            ["log", f"-{commit_limit}", "--pretty=format:%h %s"],
-        )
+        repository = get_github_repository(repository_path)
+        git_channel_id = get_channel_id("git", category_name=project_name)
+        pull_requests = get_github_pull_requests(repository, pull_request_limit)
+        registered_numbers = get_registered_pull_request_numbers(git_channel_id, repository)
+        sync_state = load_pull_request_sync_state()
+        project_state = sync_state.setdefault(project_name.lower(), {}).setdefault(repository, {})
+        roadmap_content = get_roadmap_content(project_name)
+        new_entries = []
+        updated_tasks = []
 
-        project_channels = get_project_text_channels(project_name)
-        channels_by_name = {channel["name"].lower(): channel for channel in project_channels}
-        missing_channels = {"git"} - channels_by_name.keys()
-        if missing_channels:
-            return f"Project '{project_name}' is missing required channel(s): {', '.join(sorted(missing_channels))}."
+        for pull_request in pull_requests:
+            number = str(pull_request["number"])
+            status, status_label = get_pull_request_status(pull_request)
+            previous = project_state.get(number, {})
+            if previous.get("status") != status and pull_request["number"] not in registered_numbers:
+                author = pull_request.get("author") or {}
+                new_entries.append("\n".join([
+                    f"{status_label} **Pull Request {repository}#{number}**",
+                    f"**Title:** {pull_request['title']}",
+                    f"**Author:** {author.get('login', 'Unknown')}",
+                    f"**Link:** {pull_request['url']}",
+                ]))
 
-        activity = []
-        for channel in project_channels:
-            message_count = get_recent_channel_message_count(channel["id"])
-            activity.append(f"#{channel['name']}: {message_count} recent messages")
+            roadmap_task = get_roadmap_task_match(project_name, pull_request["title"], roadmap_content)
+            roadmap_status = previous.get("roadmap_status")
+            if roadmap_task and roadmap_status != status:
+                current_status = get_roadmap_task_status(project_name, roadmap_task, roadmap_content)
+                if current_status == status:
+                    roadmap_status = status
+                else:
+                    result = update_roadmap_task(project_name, roadmap_task, status)
+                    if result.startswith("Successfully updated"):
+                        roadmap_status = status
+                        updated_tasks.append(roadmap_task)
+            project_state[number] = {
+                "status": status,
+                "roadmap_task": roadmap_task,
+                "roadmap_status": roadmap_status,
+            }
 
-        commit_lines = commits.splitlines() if commits else ["No commits found."]
-        commit_summary = "\n".join(f"• {line[:160]}" for line in commit_lines)
-        worktree_summary = "clean" if not status else f"{len(status.splitlines())} uncommitted change(s)"
-        roadmap_tracked = project_name.lower() in load_state()
-        report = "\n".join([
-            f"🔄 **Project Work Sync — {project_name.strip()}**",
-            f"**Branch:** {branch}",
-            f"**Working tree:** {worktree_summary}",
-            f"**Roadmap tracked:** {'yes' if roadmap_tracked else 'no'}",
-            "**Recent commits:**",
-            commit_summary,
-            "**Project channel activity (last 10 messages each):**",
-            "; ".join(activity),
-            "Review the roadmap and to-do items against this report before changing task status.",
-        ])
-        if len(report) > 2000:
-            return "Failed to synchronize project: generated report exceeds Discord's 2,000 character limit."
+        if new_entries:
+            messages = []
+            current_message = ""
+            for entry in new_entries:
+                candidate = f"{current_message}\n\n{entry}" if current_message else entry
+                if len(candidate) > 2000:
+                    messages.append(current_message)
+                    current_message = entry
+                else:
+                    current_message = candidate
+            if current_message:
+                messages.append(current_message)
+            for message in messages:
+                response = httpx.post(
+                    f"{BASE_URL}/channels/{git_channel_id}/messages",
+                    headers=get_headers(),
+                    json={"content": message},
+                )
+                response.raise_for_status()
 
-        response = httpx.post(
-            f"{BASE_URL}/channels/{channels_by_name['git']['id']}/messages",
-            headers=get_headers(),
-            json={"content": report},
-        )
-        response.raise_for_status()
+        save_pull_request_sync_state(sync_state)
         logger.info(
-            "project_sync project=%s branch=%s commits=%s working_tree=%s channels=%s",
-            project_name.strip(),
-            branch,
-            len(commit_lines),
-            worktree_summary,
-            len(project_channels),
+            "pull_request_sync project=%s repository=%s discovered=%s posted=%s roadmap_updated=%s",
+            project_name.strip(), repository, len(pull_requests), len(new_entries), len(updated_tasks),
         )
-        return f"Analyzed repository work and synchronized the report to #git for {project_name}."
+        return f"Synchronized {len(pull_requests)} pull requests for {repository}: logged {len(new_entries)} new item(s) in #git and updated {len(updated_tasks)} roadmap task(s)."
     except subprocess.CalledProcessError as e:
-        error = e.stderr.strip() or "Git command failed."
-        logger.warning("project_sync_git_failure project=%s error=%s", project_name.strip(), error)
-        return f"Failed to analyze repository: {error}"
+        error = e.stderr.strip() or "Command failed."
+        logger.warning("pull_request_sync_command_failure project=%s error=%s", project_name.strip(), error)
+        return f"Failed to synchronize pull requests: {error}"
     except Exception as e:
-        logger.exception("project_sync_failure project=%s", project_name.strip())
-        return f"Failed to synchronize project work: {str(e)}"
+        logger.exception("pull_request_sync_failure project=%s", project_name.strip())
+        return f"Failed to synchronize pull requests: {str(e)}"
 
 @mcp.tool()
 def create_roadmap(project_name: str, initial_roadmap: str) -> str:

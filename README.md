@@ -89,17 +89,18 @@ Saves a brainstormed concept or task idea into the designated Discord project id
 ---
 
 ### 3. analyze_and_sync_project_work
-Analyzes recent local Git work and synchronizes an evidence-based status report across the project's collaboration channels.
+Synchronizes GitHub pull-request status with the project's #git channel and roadmap.
 
 - **Parameters:**
   - `project_name` (`str`): The Discord project/category to inspect.
-  - `repository_path` (`str`, default `"."`): Local Git repository to analyze.
-  - `commit_limit` (`int`, default `5`): Number of recent commits to include (1–20).
-- **Behavior:** Reads the active branch, working-tree status, and recent commits using read-only Git commands. It scans the ten most recent messages in every text channel beneath the project category, without duplicating those message contents, then publishes the resulting report to #git only.
-- **Safety:** The tool does not infer or change roadmap task statuses. It reports whether a roadmap is tracked and asks the calling agent to review the evidence before using update_roadmap_task.
+  - `repository_path` (`str`, default `"."`): Local Git repository whose `origin` points to GitHub.
+  - `pull_request_limit` (`int`, default `50`): Maximum number of pull requests to inspect (1–100).
+- **Behavior:** Resolves the GitHub repository from `origin` and uses the authenticated GitHub CLI to inspect pull requests. It checks recent #git messages and a compact local state file to avoid duplicate posts, then logs only new or changed pull-request states in #git.
+- **Roadmap updates:** A merged PR marks its clearly matching roadmap task as completed (`✅`); an open PR marks it as in testing (`🛠️`). Ambiguous matches are left unchanged.
+- **No generic activity reports:** The tool does not post commit, branch, working-tree, or channel-activity summaries.
 
 ### Local logs
-Each sync writes one compact operational entry to `logs/taskord.log`; no sync messages are posted to #to-do. The file rotates at 512 KB and retains at most three backups, limiting local storage to roughly 2 MB. The `logs/` directory is ignored by Git.
+Each sync writes one compact operational entry to `logs/taskord.log`; no sync messages are posted to #to-do. The file rotates at 512 KB and retains at most three backups, limiting local storage to roughly 2 MB. The ignored `pull_request_sync_state.json` records only PR numbers, their latest state, and any matched roadmap task.
 
 ### 4. `create_roadmap`
 Posts a new formatted roadmap message to Discord and records its channel and message IDs for tracking.
@@ -276,6 +277,6 @@ The following feature requests have been registered in the `#suggestions` channe
      - `#git`
 
 3. **Intelligent Work Analysis & Multi-Channel Sync:** ✅ Implemented with analyze_and_sync_project_work.
-   - Analyzes recent local codebase work, commits, branch, and working-tree state.
-   - Scans all text channels under a project and sends a shared evidence-based report to #git and #to-do.
+   - Finds GitHub pull requests not yet represented in the project's #git history.
+   - Logs new PR status in #git and updates clearly matching roadmap items.
 
