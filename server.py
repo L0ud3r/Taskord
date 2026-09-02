@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -6,15 +7,11 @@ from mcp.server.fastmcp import FastMCP
 # Initialize FastMCP Server
 mcp = FastMCP("DiscordProjectManager")
 
-# Configuration
-DISCORD_TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
-GUILD_ID = "1543979060823330946"
-HEADERS = {
-    "Authorization": f"Bot {DISCORD_TOKEN}",
-    "Content-Type": "application/json"
-}
+# Configuration Constants
 BASE_URL = "https://discord.com/api/v10"
+CONFIG_FILE = "config.json"
 STATE_FILE = "roadmap_state.json"
+
 STATUS_ICONS = {
     "done": "✅",
     "progress": "🔄",
@@ -22,9 +19,66 @@ STATUS_ICONS = {
     "planned": "⬜",
 }
 
+def load_config() -> dict:
+    """Load configuration from config.json."""
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_config(config: dict) -> None:
+    """Persist configuration to config.json."""
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2)
+
+def get_headers() -> dict:
+    """Get HTTP headers for Discord API authentication."""
+    token = os.environ.get("DISCORD_BOT_TOKEN")
+    if not token:
+        raise ValueError("DISCORD_BOT_TOKEN environment variable is not set.")
+    return {
+        "Authorization": f"Bot {token}",
+        "Content-Type": "application/json"
+    }
+
+def get_guild_id() -> str:
+    """
+    Fetch the Discord Guild ID from environment variable, config.json,
+    or prompt the user interactively if in a terminal session.
+    """
+    env_guild = os.environ.get("DISCORD_GUILD_ID")
+    if env_guild and env_guild.strip():
+        return env_guild.strip()
+
+    config = load_config()
+    guild_id = config.get("guild_id")
+    if guild_id and str(guild_id).strip():
+        return str(guild_id).strip()
+
+    # Interactive prompt fallback if running directly in a terminal
+    try:
+        if sys.stdin and sys.stdin.isatty():
+            print("Discord Guild (Server) ID is not configured.")
+            entered = input("Please enter your Discord Guild ID: ").strip()
+            if entered:
+                config["guild_id"] = entered
+                save_config(config)
+                return entered
+    except Exception:
+        pass
+
+    raise ValueError(
+        "Discord Guild ID is not configured. Please set DISCORD_GUILD_ID environment variable, "
+        "provide 'guild_id' in config.json, or use the set_guild_id MCP tool."
+    )
+
 def get_channel_id(channel_name: str, category_name: str | None = None) -> str:
     """Fetch a channel ID by name, optionally scoped to a category."""
-    response = httpx.get(f"{BASE_URL}/guilds/{GUILD_ID}/channels", headers=HEADERS)
+    guild_id = get_guild_id()
+    response = httpx.get(f"{BASE_URL}/guilds/{guild_id}/channels", headers=get_headers())
     response.raise_for_status()
     channels = response.json()
     category_ids = {
@@ -42,19 +96,48 @@ def get_channel_id(channel_name: str, category_name: str | None = None) -> str:
     category_suffix = f" in category '{category_name}'" if category_name else ""
     raise ValueError(f"Channel '{channel_name}' not found{category_suffix}.")
 
-def load_state():
+def load_state() -> dict:
+    """Load roadmap state from state file."""
     if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r") as f:
-            return json.load(f)
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
     return {}
 
-def save_state(state):
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f)
+def save_state(state: dict) -> None:
+    """Save roadmap state to state file."""
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
+
+@mcp.tool()
+def set_guild_id(guild_id: str) -> str:
+    """Configures and saves the target Discord Guild (Server) ID into config.json."""
+    cleaned = guild_id.strip()
+    if not cleaned:
+        return "Error: Guild ID cannot be empty."
+    config = load_config()
+    config["guild_id"] = cleaned
+    save_config(config)
+    return f"Successfully updated and saved Discord Guild ID: {cleaned}"
+
+@mcp.tool()
+def get_server_config() -> str:
+    """Returns the current server configuration status (excluding sensitive tokens)."""
+    config = load_config()
+    env_guild = os.environ.get("DISCORD_GUILD_ID")
+    active_guild = env_guild or config.get("guild_id") or "Not configured"
+    source = "Environment (DISCORD_GUILD_ID)" if env_guild else ("config.json" if config.get("guild_id") else "None")
+    return (
+        f"Active Discord Guild ID: {active_guild} (Source: {source})\n"
+        f"Config File: {CONFIG_FILE}\n"
+        f"State File: {STATE_FILE}"
+    )
 
 @mcp.tool()
 def save_idea(project_name: str, idea_text: str) -> str:
-    """Saves a brainstormed idea into the designated project ideas channel."""
+    """Saves a brainstormed idea into the designated project ideas/to-do channel."""
     try:
         try:
             channel_name = "to-do"
@@ -63,7 +146,7 @@ def save_idea(project_name: str, idea_text: str) -> str:
             channel_name = f"{project_name.lower()}-ideas"
             channel_id = get_channel_id(channel_name)
         payload = {"content": f"💡 **New Idea:**\n{idea_text}"}
-        resp = httpx.post(f"{BASE_URL}/channels/{channel_id}/messages", headers=HEADERS, json=payload)
+        resp = httpx.post(f"{BASE_URL}/channels/{channel_id}/messages", headers=get_headers(), json=payload)
         resp.raise_for_status()
         return f"Successfully saved idea to #{channel_name}."
     except Exception as e:
@@ -85,7 +168,7 @@ def create_roadmap(project_name: str, initial_roadmap: str) -> str:
                 channel_name = f"{project_key}-roadmap"
                 channel_id = get_channel_id(channel_name)
         payload = {"content": initial_roadmap}
-        resp = httpx.post(f"{BASE_URL}/channels/{channel_id}/messages", headers=HEADERS, json=payload)
+        resp = httpx.post(f"{BASE_URL}/channels/{channel_id}/messages", headers=get_headers(), json=payload)
         resp.raise_for_status()
         
         message_id = resp.json()["id"]
@@ -110,7 +193,7 @@ def replace_roadmap(project_name: str, roadmap: str) -> str:
     try:
         resp = httpx.patch(
             f"{BASE_URL}/channels/{channel_id}/messages/{message_id}",
-            headers=HEADERS,
+            headers=get_headers(),
             json={"content": roadmap},
         )
         resp.raise_for_status()
@@ -135,7 +218,7 @@ def update_roadmap_task(project_name: str, task_name: str, status: str) -> str:
     
     try:
         # Fetch current message
-        resp = httpx.get(f"{BASE_URL}/channels/{channel_id}/messages/{message_id}", headers=HEADERS)
+        resp = httpx.get(f"{BASE_URL}/channels/{channel_id}/messages/{message_id}", headers=get_headers())
         resp.raise_for_status()
         content = resp.json()["content"]
         
@@ -211,7 +294,7 @@ def update_roadmap_task(project_name: str, task_name: str, status: str) -> str:
         
         patch_resp = httpx.patch(
             f"{BASE_URL}/channels/{channel_id}/messages/{message_id}", 
-            headers=HEADERS, 
+            headers=get_headers(), 
             json={"content": new_content}
         )
         patch_resp.raise_for_status()
@@ -219,6 +302,6 @@ def update_roadmap_task(project_name: str, task_name: str, status: str) -> str:
         return f"Successfully updated '{task_name}' to {status} and recalculated progress."
     except Exception as e:
         return f"Failed to update roadmap: {str(e)}"
-    
+
 if __name__ == "__main__":
     mcp.run()
