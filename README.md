@@ -9,10 +9,11 @@ Taskord is a **Model Context Protocol (MCP)** server (`DiscordProjectManager`) b
 - [Architecture & Tech Stack](#architecture--tech-stack)
 - [Configuration & Environment Variables](#configuration--environment-variables)
 - [Core Features & MCP Tools](#core-features--mcp-tools)
-  - [`save_idea`](#1-save_idea)
-  - [`create_roadmap`](#2-create_roadmap)
-  - [`replace_roadmap`](#3-replace_roadmap)
-  - [`update_roadmap_task`](#4-update_roadmap_task)
+  - [`set_guild_id` & `get_server_config`](#1-set_guild_id--get_server_config)
+  - [`save_idea`](#2-save_idea)
+  - [`create_roadmap`](#3-create_roadmap)
+  - [`replace_roadmap`](#4-replace_roadmap)
+  - [`update_roadmap_task`](#5-update_roadmap_task)
 - [Progress Calculation & Discord Formatting](#progress-calculation--discord-formatting)
 - [State Management (`roadmap_state.json`)](#state-management-roadmap_statejson)
 - [Installation & Setup](#installation--setup)
@@ -46,18 +47,30 @@ flowchart TD
 
 ## Configuration & Environment Variables
 
-| Variable / Constant | Type | Source / Default | Description |
+| Variable / File | Type | Source / Default | Description |
 | :--- | :--- | :--- | :--- |
 | `DISCORD_BOT_TOKEN` | Environment Variable | `os.environ.get("DISCORD_BOT_TOKEN")` | Bot authorization token for Discord API authentication. |
-| `GUILD_ID` | Hardcoded Constant | `"1543979060823330946"` | Discord server / guild ID where project channels reside. |
+| `DISCORD_GUILD_ID` | Environment Variable | `os.environ.get("DISCORD_GUILD_ID")` | Optional environment variable specifying the target Discord Guild (Server) ID. |
+| `config.json` | Local File (Git Ignored) | `config.json` | Local configuration storing `"guild_id"`. Template provided at `config.json.example`. |
+| `roadmap_state.json` | Local File (Git Ignored) | `roadmap_state.json` | Local state tracking active roadmap message IDs. Template at `roadmap_state.json.example`. |
 | `BASE_URL` | Constant | `"https://discord.com/api/v10"` | Discord v10 REST endpoint base URL. |
-| `STATE_FILE` | Constant | `"roadmap_state.json"` | Path to the local JSON file tracking active roadmap messages. |
+
+> [!NOTE]
+> If Guild ID is not provided in `DISCORD_GUILD_ID` or `config.json`, the server will interactively prompt for it in a terminal session, or you can configure it on the fly using the `set_guild_id` MCP tool.
 
 ---
 
 ## Core Features & MCP Tools
 
-### 1. `save_idea`
+### 1. `set_guild_id` & `get_server_config`
+Configures or checks the target Discord Guild ID at runtime and saves it to local `config.json`.
+
+- `set_guild_id(guild_id: str)`: Configures and persists the Discord Guild (Server) ID.
+- `get_server_config()`: Returns the active Guild ID, state file, and config file status.
+
+---
+
+### 2. `save_idea`
 Saves a brainstormed concept or task idea into the designated Discord project ideas/to-do channel.
 
 - **Parameters:**
@@ -74,7 +87,7 @@ Saves a brainstormed concept or task idea into the designated Discord project id
 
 ---
 
-### 2. `create_roadmap`
+### 3. `create_roadmap`
 Posts a new formatted roadmap message to Discord and records its channel and message IDs for tracking.
 
 - **Parameters:**
@@ -88,7 +101,7 @@ Posts a new formatted roadmap message to Discord and records its channel and mes
 
 ---
 
-### 3. `replace_roadmap`
+### 4. `replace_roadmap`
 Completely updates/replaces the contents of the existing tracked roadmap message using an in-place Discord API `PATCH` request.
 
 - **Parameters:**
@@ -98,7 +111,7 @@ Completely updates/replaces the contents of the existing tracked roadmap message
 
 ---
 
-### 4. `update_roadmap_task`
+### 5. `update_roadmap_task`
 Updates the status icon of a single task in the roadmap message and automatically recalculates category progress percentages and progress bars.
 
 - **Parameters:**
