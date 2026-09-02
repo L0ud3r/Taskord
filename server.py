@@ -15,7 +15,7 @@ STATE_FILE = "roadmap_state.json"
 STATUS_ICONS = {
     "done": "✅",
     "progress": "🔄",
-    "testing": "⚠️",
+    "testing": "🛠️",
     "planned": "⬜",
 }
 
@@ -289,7 +289,7 @@ def update_roadmap_task(project_name: str, task_name: str, status: str) -> str:
             "⬜ Planned"
         ]
         
-        # Combine everything and update Discord
+        # Combine everything and update Discordl
         new_content = "\n".join(task_section + progress_lines + legend)
         
         patch_resp = httpx.patch(
