@@ -19,6 +19,12 @@ STATUS_ICONS = {
     "planned": "⬜",
 }
 
+PULL_REQUEST_EVENTS = {
+    "opened": "🟢 Opened",
+    "merged": "🟣 Merged",
+    "closed": "🔴 Closed",
+}
+
 def load_config() -> dict:
     """Load configuration from config.json."""
     if os.path.exists(CONFIG_FILE):
@@ -96,6 +102,10 @@ def get_channel_id(channel_name: str, category_name: str | None = None) -> str:
     category_suffix = f" in category '{category_name}'" if category_name else ""
     raise ValueError(f"Channel '{channel_name}' not found{category_suffix}.")
 
+def format_optional_pr_field(label: str, value: str | None) -> str:
+    """Format a non-empty pull-request metadata field for a Discord message."""
+    return f"**{label}:** {value.strip()}" if value and value.strip() else ""
+
 def load_state() -> dict:
     """Load roadmap state from state file."""
     if os.path.exists(STATE_FILE):
@@ -151,6 +161,49 @@ def save_idea(project_name: str, idea_text: str) -> str:
         return f"Successfully saved idea to #{channel_name}."
     except Exception as e:
         return f"Failed to save idea: {str(e)}"
+
+@mcp.tool()
+def log_pull_request_activity(
+    project_name: str,
+    repository: str,
+    pull_request_number: int,
+    event: str,
+    title: str = "",
+    author: str = "",
+    url: str = "",
+    summary: str = "",
+) -> str:
+    """Posts an opened, merged, or closed pull-request event to the project's #git channel."""
+    normalized_event = event.strip().lower()
+    if normalized_event not in PULL_REQUEST_EVENTS:
+        return "Invalid event. Use opened, merged, or closed."
+    if not project_name.strip() or not repository.strip() or pull_request_number <= 0:
+        return "Project name, repository, and a positive pull request number are required."
+
+    try:
+        channel_id = get_channel_id("git", category_name=project_name)
+        event_label = PULL_REQUEST_EVENTS[normalized_event]
+        pr_reference = f"{repository.strip()}#{pull_request_number}"
+        lines = [
+            f"{event_label} **Pull Request {pr_reference}**",
+            format_optional_pr_field("Title", title),
+            format_optional_pr_field("Author", author),
+            format_optional_pr_field("Link", url),
+            format_optional_pr_field("Summary", summary),
+        ]
+        content = "\n".join(line for line in lines if line)
+        if len(content) > 2000:
+            return "Failed to log pull request: formatted message exceeds Discord's 2,000 character limit."
+
+        response = httpx.post(
+            f"{BASE_URL}/channels/{channel_id}/messages",
+            headers=get_headers(),
+            json={"content": content},
+        )
+        response.raise_for_status()
+        return f"Logged pull request {pr_reference} as {normalized_event} in #git."
+    except Exception as e:
+        return f"Failed to log pull request: {str(e)}"
 
 @mcp.tool()
 def create_roadmap(project_name: str, initial_roadmap: str) -> str:
