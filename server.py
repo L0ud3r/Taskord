@@ -118,6 +118,13 @@ def get_channel_id(channel_name: str, category_name: str | None = None) -> str:
     category_suffix = f" in category '{category_name}'" if category_name else ""
     raise ValueError(f"Channel '{channel_name}' not found{category_suffix}.")
 
+def validate_discord_id(value: str, label: str) -> str:
+    """Validate and normalize a Discord snowflake supplied to a public tool."""
+    normalized = str(value).strip()
+    if not normalized or not normalized.isdigit():
+        raise ValueError(f"{label} must be a valid Discord ID.")
+    return normalized
+
 def run_git_command(repository_path: str, arguments: list[str]) -> str:
     """Run a read-only git command in a repository and return its output."""
     result = subprocess.run(
@@ -300,6 +307,77 @@ def get_server_config() -> str:
         f"Config File: {CONFIG_FILE}\n"
         f"State File: {STATE_FILE}"
     )
+
+@mcp.tool()
+def read_channel_messages(channel_id: str, limit: int = 50, before: str | None = None) -> list[dict]:
+    """Read recent messages from a Discord channel the bot can access.
+
+    Results are newest first. Use the ID of the last result as ``before`` to
+    retrieve an earlier page. Discord permits a maximum of 100 messages per
+    request.
+    """
+    try:
+        channel_id = validate_discord_id(channel_id, "channel_id")
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100.")
+
+        params: dict[str, str | int] = {"limit": limit}
+        if before is not None:
+            params["before"] = validate_discord_id(before, "before")
+
+        response = httpx.get(
+            f"{BASE_URL}/channels/{channel_id}/messages",
+            headers=get_headers(),
+            params=params,
+        )
+        response.raise_for_status()
+        return [
+            {
+                "id": message["id"],
+                "content": message.get("content", ""),
+                "author": {
+                    "id": message.get("author", {}).get("id"),
+                    "username": message.get("author", {}).get("username"),
+                    "bot": message.get("author", {}).get("bot", False),
+                },
+                "timestamp": message.get("timestamp"),
+                "edited_timestamp": message.get("edited_timestamp"),
+                "attachments": [
+                    {"filename": attachment.get("filename"), "url": attachment.get("url")}
+                    for attachment in message.get("attachments", [])
+                ],
+            }
+            for message in response.json()
+        ]
+    except Exception as e:
+        return [{"error": f"Failed to read channel messages: {str(e)}"}]
+
+@mcp.tool()
+def edit_channel_message(channel_id: str, message_id: str, content: str) -> dict:
+    """Replace the text content of a message authored by this Discord bot."""
+    try:
+        channel_id = validate_discord_id(channel_id, "channel_id")
+        message_id = validate_discord_id(message_id, "message_id")
+        if not content or not content.strip():
+            raise ValueError("content cannot be empty.")
+        if len(content) > 2000:
+            raise ValueError("content cannot exceed Discord's 2,000-character limit.")
+
+        response = httpx.patch(
+            f"{BASE_URL}/channels/{channel_id}/messages/{message_id}",
+            headers=get_headers(),
+            json={"content": content},
+        )
+        response.raise_for_status()
+        message = response.json()
+        return {
+            "id": message["id"],
+            "channel_id": message.get("channel_id", channel_id),
+            "content": message.get("content", ""),
+            "edited_timestamp": message.get("edited_timestamp"),
+        }
+    except Exception as e:
+        return {"error": f"Failed to edit channel message: {str(e)}"}
 
 @mcp.tool()
 def save_idea(project_name: str, idea_text: str) -> str:

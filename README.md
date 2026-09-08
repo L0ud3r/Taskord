@@ -88,7 +88,19 @@ Saves a brainstormed concept or task idea into the designated Discord project id
 
 ---
 
-### 3. analyze_and_sync_project_work
+### 3. `read_channel_messages` & `edit_channel_message`
+Read a channel's recent history and edit a message created by the configured bot.
+
+- `read_channel_messages(channel_id: str, limit: int = 50, before: str | None = None)`
+  - Returns up to 100 messages, newest first, including message ID, content, author, timestamps, and attachment metadata.
+  - Pass the last returned message ID as `before` to retrieve the preceding page.
+- `edit_channel_message(channel_id: str, message_id: str, content: str)`
+  - Replaces a bot-authored message's content in place. Content must contain 1–2,000 characters.
+  - Discord only allows bots to edit messages that they authored. The bot also needs permission to view the channel and its history.
+
+---
+
+### 4. analyze_and_sync_project_work
 Synchronizes GitHub pull-request status with the project's #git channel and roadmap.
 
 - **Parameters:**
@@ -102,7 +114,7 @@ Synchronizes GitHub pull-request status with the project's #git channel and road
 ### Local logs
 Each sync writes one compact operational entry to `logs/taskord.log`; no sync messages are posted to #to-do. The file rotates at 512 KB and retains at most three backups, limiting local storage to roughly 2 MB. The ignored `pull_request_sync_state.json` records only PR numbers, their latest state, and any matched roadmap task.
 
-### 4. `create_roadmap`
+### 5. `create_roadmap`
 Posts a new formatted roadmap message to Discord and records its channel and message IDs for tracking.
 
 - **Parameters:**
@@ -116,7 +128,7 @@ Posts a new formatted roadmap message to Discord and records its channel and mes
 
 ---
 
-### 5. `replace_roadmap`
+### 6. `replace_roadmap`
 Completely updates/replaces the contents of the existing tracked roadmap message using an in-place Discord API `PATCH` request.
 
 - **Parameters:**
@@ -126,7 +138,7 @@ Completely updates/replaces the contents of the existing tracked roadmap message
 
 ---
 
-### 6. `update_roadmap_task`
+### 7. `update_roadmap_task`
 Updates the status icon of a single task in the roadmap message and automatically recalculates category progress percentages and progress bars.
 
 - **Parameters:**
