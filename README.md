@@ -11,10 +11,12 @@ Taskord is a **Model Context Protocol (MCP)** server (`DiscordProjectManager`) b
 - [Core Features & MCP Tools](#core-features--mcp-tools)
   - [`set_guild_id` & `get_server_config`](#1-set_guild_id--get_server_config)
   - [`save_idea`](#2-save_idea)
+  - [`log_pull_request_activity`](#3-log_pull_request_activity)
+  - [`read_channel_messages` & `edit_channel_message`](#4-read_channel_messages--edit_channel_message)
   - analyze_and_sync_project_work
-  - [`create_roadmap`](#4-create_roadmap)
-  - [`replace_roadmap`](#5-replace_roadmap)
-  - [`update_roadmap_task`](#6-update_roadmap_task)
+  - [`create_roadmap`](#6-create_roadmap)
+  - [`replace_roadmap`](#7-replace_roadmap)
+  - [`update_roadmap_task`](#8-update_roadmap_task)
 - [Progress Calculation & Discord Formatting](#progress-calculation--discord-formatting)
 - [State Management (`roadmap_state.json`)](#state-management-roadmap_statejson)
 - [Installation & Setup](#installation--setup)
@@ -88,7 +90,15 @@ Saves a brainstormed concept or task idea into the designated Discord project id
 
 ---
 
-### 3. `read_channel_messages` & `edit_channel_message`
+### 3. `log_pull_request_activity`
+Posts a pull-request lifecycle update in the project's `#git` channel. This tool is designed for agents, CI jobs, or webhook handlers to call whenever a pull request changes state.
+
+- **Parameters:** `project_name`, `repository`, `pull_request_number`, and `event` (`opened`, `merged`, or `closed`); `title`, `author`, `url`, and `summary` are optional.
+- **Behavior:** Validates the event, finds `#git` beneath the project's category, and posts one formatted audit entry.
+
+---
+
+### 4. `read_channel_messages` & `edit_channel_message`
 Read a channel's recent history and edit a message created by the configured bot.
 
 - `read_channel_messages(channel_id: str, limit: int = 50, before: str | None = None)`
@@ -100,7 +110,7 @@ Read a channel's recent history and edit a message created by the configured bot
 
 ---
 
-### 4. analyze_and_sync_project_work
+### 5. analyze_and_sync_project_work
 Synchronizes GitHub pull-request status with the project's #git channel and roadmap.
 
 - **Parameters:**
@@ -114,7 +124,7 @@ Synchronizes GitHub pull-request status with the project's #git channel and road
 ### Local logs
 Each sync writes one compact operational entry to `logs/taskord.log`; no sync messages are posted to #to-do. The file rotates at 512 KB and retains at most three backups, limiting local storage to roughly 2 MB. The ignored `pull_request_sync_state.json` records only PR numbers, their latest state, and any matched roadmap task.
 
-### 5. `create_roadmap`
+### 6. `create_roadmap`
 Posts a new formatted roadmap message to Discord and records its channel and message IDs for tracking.
 
 - **Parameters:**
@@ -128,7 +138,7 @@ Posts a new formatted roadmap message to Discord and records its channel and mes
 
 ---
 
-### 6. `replace_roadmap`
+### 7. `replace_roadmap`
 Completely updates/replaces the contents of the existing tracked roadmap message using an in-place Discord API `PATCH` request.
 
 - **Parameters:**
@@ -138,7 +148,7 @@ Completely updates/replaces the contents of the existing tracked roadmap message
 
 ---
 
-### 7. `update_roadmap_task`
+### 8. `update_roadmap_task`
 Updates the status icon of a single task in the roadmap message and automatically recalculates category progress percentages and progress bars.
 
 - **Parameters:**

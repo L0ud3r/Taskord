@@ -125,6 +125,10 @@ def validate_discord_id(value: str, label: str) -> str:
         raise ValueError(f"{label} must be a valid Discord ID.")
     return normalized
 
+def format_optional_pr_field(label: str, value: str | None) -> str:
+    """Format a non-empty pull-request metadata field for a Discord message."""
+    return f"**{label}:** {value.strip()}" if value and value.strip() else ""
+
 def run_git_command(repository_path: str, arguments: list[str]) -> str:
     """Run a read-only git command in a repository and return its output."""
     result = subprocess.run(
@@ -395,6 +399,49 @@ def save_idea(project_name: str, idea_text: str) -> str:
         return f"Successfully saved idea to #{channel_name}."
     except Exception as e:
         return f"Failed to save idea: {str(e)}"
+
+@mcp.tool()
+def log_pull_request_activity(
+    project_name: str,
+    repository: str,
+    pull_request_number: int,
+    event: str,
+    title: str = "",
+    author: str = "",
+    url: str = "",
+    summary: str = "",
+) -> str:
+    """Posts an opened, merged, or closed pull-request event to the project's #git channel."""
+    normalized_event = event.strip().lower()
+    if normalized_event not in PULL_REQUEST_EVENTS:
+        return "Invalid event. Use opened, merged, or closed."
+    if not project_name.strip() or not repository.strip() or pull_request_number <= 0:
+        return "Project name, repository, and a positive pull request number are required."
+
+    try:
+        channel_id = get_channel_id("git", category_name=project_name)
+        event_label = PULL_REQUEST_EVENTS[normalized_event]
+        pr_reference = f"{repository.strip()}#{pull_request_number}"
+        lines = [
+            f"{event_label} **Pull Request {pr_reference}**",
+            format_optional_pr_field("Title", title),
+            format_optional_pr_field("Author", author),
+            format_optional_pr_field("Link", url),
+            format_optional_pr_field("Summary", summary),
+        ]
+        content = "\n".join(line for line in lines if line)
+        if len(content) > 2000:
+            return "Failed to log pull request: formatted message exceeds Discord's 2,000 character limit."
+
+        response = httpx.post(
+            f"{BASE_URL}/channels/{channel_id}/messages",
+            headers=get_headers(),
+            json={"content": content},
+        )
+        response.raise_for_status()
+        return f"Logged pull request {pr_reference} as {normalized_event} in #git."
+    except Exception as e:
+        return f"Failed to log pull request: {str(e)}"
 
 @mcp.tool()
 def analyze_and_sync_project_work(
